@@ -1,0 +1,127 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+#define DAC_PIN 25
+#define BAUD_RATE 921600
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+String displayText = "";
+bool textMode = false;
+
+unsigned long lastScrollTime = 0;
+unsigned long pauseStartTime = 0;
+
+int scrollIndex = 0;
+int scrollSpeed = 450;      // scrolling speed
+bool pauseBeforeScroll = true;
+
+void setup() {
+  Serial.begin(BAUD_RATE);
+
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("System Ready");
+}
+
+void loop() {
+
+  while (Serial.available()) {
+
+    char incoming = Serial.read();
+
+    // TEXT MODE
+    if (incoming == 'T') {
+      delay(2);
+      if (Serial.read() == ':') {
+        textMode = true;
+        displayText = "";
+        scrollIndex = 0;
+        pauseBeforeScroll = true;
+        continue;
+      }
+    }
+
+    // AUDIO MODE
+    if (incoming == 'A') {
+      delay(2);
+      if (Serial.read() == ':') {
+        textMode = false;
+        continue;
+      }
+    }
+
+    if (textMode) {
+
+      static String buffer = "";
+
+      if (incoming == '\n') {
+        displayText = buffer;
+        buffer = "";
+        scrollIndex = 0;
+        pauseBeforeScroll = true;
+        pauseStartTime = millis();
+        lcd.clear();
+      } else {
+        buffer += incoming;
+      }
+
+    } else {
+      // AUDIO OUTPUT
+      dacWrite(DAC_PIN, (uint8_t)incoming);
+    }
+  }
+
+  // -------- DISPLAY LOGIC --------
+
+  if (displayText.length() > 0) {
+
+    // If text is short → center it
+    if (displayText.length() <= 16) {
+
+      lcd.setCursor(0, 0);
+      lcd.print("                ");
+
+      int startPos = (16 - displayText.length()) / 2;
+      lcd.setCursor(startPos, 0);
+      lcd.print(displayText);
+
+    }
+    else {
+      // First show first 16 chars and pause 2 sec
+      if (pauseBeforeScroll) {
+
+        lcd.setCursor(0, 0);
+        lcd.print(displayText.substring(0, 16));
+
+        if (millis() - pauseStartTime >= 2000) {
+          pauseBeforeScroll = false;
+          lastScrollTime = millis();
+        }
+      }
+      else {
+        if (millis() - lastScrollTime > scrollSpeed) {
+
+          lastScrollTime = millis();
+
+          lcd.setCursor(0, 0);
+          lcd.print("                ");
+          lcd.setCursor(0, 0);
+
+          String visibleText = displayText.substring(scrollIndex, scrollIndex + 16);
+          lcd.print(visibleText);
+
+          scrollIndex++;
+
+          if (scrollIndex > displayText.length()) {
+            scrollIndex = 0;
+            pauseBeforeScroll = true;
+            pauseStartTime = millis();
+          }
+        }
+      }
+    }
+  }
+}
